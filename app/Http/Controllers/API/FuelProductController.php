@@ -190,9 +190,7 @@ class FuelProductController extends Controller
         return response()->json($inventory);
     }
 
-    /**
-     * Add inventory (stock in)
-     */
+  
     public function addInventory(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -208,7 +206,6 @@ class FuelProductController extends Controller
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
-
         $currentStock = FuelInventory::where('fuel_product_id', $request->fuel_product_id)
             ->where('remaining_liters', '>', 0)
             ->sum('remaining_liters');

@@ -12,7 +12,7 @@ return new class extends Migration {
             $table->foreignId('fuel_sale_id')->constrained('fuel_sales');
             $table->decimal('amount_paid', 10, 2)->default(0.00);
             $table->decimal('change_amount', 10, 2)->default(0.00);
-            $table->enum('payment_method', ['cash', 'gcash', 'card'])->default('cash');
+            $table->enum('payment_method', ['cash'])->default('cash');
             $table->enum('status', ['paid', 'unpaid'])->default('unpaid');
             $table->foreignId('processed_by')->constrained('users');
             $table->timestamps();

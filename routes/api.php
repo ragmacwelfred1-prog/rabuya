@@ -22,13 +22,34 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\API\NotificationController;
 
 // ─── PUBLIC ROUTES ────────────────────────────────────────────────────────────
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/staff/login', [AuthController::class, 'staffLogin']);
-Route::post('/customer/login', [AuthController::class, 'customerLogin']);
-Route::post('/customer/register', [AuthController::class, 'customerRegister']);
 
-Route::post('/send-otp', [AuthController::class, 'sendOtp']);
-Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
+// Admin login — 2-step (password → emailed OTP)
+Route::post('/login', [AuthController::class, 'login'])
+    ->middleware('throttle:10,1');
+Route::post('/login/verify-otp', [AuthController::class, 'adminVerifyLoginOtp'])
+    ->middleware('throttle:10,1');
+Route::post('/login/resend-otp', [AuthController::class, 'adminResendLoginOtp'])
+    ->middleware('throttle:5,1');
+
+// Staff & customer login
+Route::post('/staff/login', [AuthController::class, 'staffLogin'])
+    ->middleware('throttle:10,1');
+Route::post('/customer/login', [AuthController::class, 'customerLogin'])
+    ->middleware('throttle:10,1');
+Route::post('/customer/register', [AuthController::class, 'customerRegister'])
+    ->middleware('throttle:10,1');
+
+// Registration OTP
+Route::post('/send-otp', [AuthController::class, 'sendOtp'])
+    ->middleware('throttle:5,1');
+Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])
+    ->middleware('throttle:10,1');
+
+// ─── FORGOT PASSWORD ─────────────────────────────────────────────────────────
+Route::post('/customer/forgot-password/send-otp', [AuthController::class, 'forgotPasswordSendOtp'])
+    ->middleware('throttle:5,1');
+Route::post('/customer/forgot-password/reset', [AuthController::class, 'forgotPasswordReset'])
+    ->middleware('throttle:10,1');
 
 // NOTE: /broadcasting/auth removed — polling no longer needs it.
 
@@ -126,27 +147,33 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── CUSTOMER ROUTES ─────────────────────────────────────────────────────
     Route::prefix('customer')->group(function () {
-        Route::post('/logout', [AuthController::class, 'customerLogout']);
-        Route::get('/me', [AuthController::class, 'customerMe']);
 
-        Route::get('/profile', [AuthController::class, 'customerProfile']);
-        Route::put('/profile', [AuthController::class, 'updateCustomerProfile']);
+        // Logout dapat always possible kahit deactivated (para walang infinite loop)
+        Route::post('/logout', [AuthController::class, 'customerLogout'])
+            ->middleware('auth:sanctum');
 
-        Route::get('/vehicles', [BookingController::class, 'myVehicles']);
-        Route::post('/vehicles', [BookingController::class, 'addVehicle']);
-        Route::put('/vehicles/{id}', [BookingController::class, 'updateVehicle']);
-        Route::delete('/vehicles/{id}', [BookingController::class, 'deleteVehicle']);
+        Route::middleware(['auth:sanctum', 'customer.active'])->group(function () {
+            Route::get('/me', [AuthController::class, 'customerMe']);
 
-        Route::get('/slots/available', [ParkingSlotController::class, 'getAvailable']);
+            Route::get('/profile', [AuthController::class, 'customerProfile']);
+            Route::put('/profile', [AuthController::class, 'updateCustomerProfile']);
 
-        Route::get('/bookings', [BookingController::class, 'myBookings']);
-        Route::post('/bookings', [BookingController::class, 'createBooking']);
-        Route::get('/bookings/{id}', [BookingController::class, 'showBooking']);
-        Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']);
-        Route::delete('/bookings/{id}', [BookingController::class, 'cancelBooking']);
-        Route::post('/bookings/{id}/checkin', [BookingController::class, 'checkIn']);
-        Route::post('/bookings/{id}/downpayment', [DownpaymentController::class, 'createDownpayment']);
-        Route::get('/bookings/{id}/downpayment/status', [DownpaymentController::class, 'downpaymentStatus']);
+            Route::get('/vehicles', [BookingController::class, 'myVehicles']);
+            Route::post('/vehicles', [BookingController::class, 'addVehicle']);
+            Route::put('/vehicles/{id}', [BookingController::class, 'updateVehicle']);
+            Route::delete('/vehicles/{id}', [BookingController::class, 'deleteVehicle']);
+
+            Route::get('/slots/available', [ParkingSlotController::class, 'getAvailable']);
+
+            Route::get('/bookings', [BookingController::class, 'myBookings']);
+            Route::post('/bookings', [BookingController::class, 'createBooking']);
+            Route::get('/bookings/{id}', [BookingController::class, 'showBooking']);
+            Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancelBooking']);
+            Route::delete('/bookings/{id}', [BookingController::class, 'cancelBooking']);
+            Route::post('/bookings/{id}/checkin', [BookingController::class, 'checkIn']);
+            Route::post('/bookings/{id}/downpayment', [DownpaymentController::class, 'createDownpayment']);
+            Route::get('/bookings/{id}/downpayment/status', [DownpaymentController::class, 'downpaymentStatus']);
+        });
     });
 
     // ─── ADMIN ROUTES ────────────────────────────────────────────────────────
@@ -192,6 +219,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/customers', [AdminBookingController::class, 'getAllCustomers']);
         Route::get('/customers/{id}', [AdminBookingController::class, 'getCustomerDetails']);
         Route::put('/customers/{id}', [AdminBookingController::class, 'updateCustomer']);
+        Route::patch('/customers/{id}/toggle-status', [AdminBookingController::class, 'toggleCustomerStatus']);
         Route::post('/customers/{id}/license', [AdminBookingController::class, 'uploadLicense']);
         Route::delete('/customers/{id}/license', [AdminBookingController::class, 'deleteLicensePhoto']);
         Route::get('/customers/stats', [AdminBookingController::class, 'getCustomerStats']);

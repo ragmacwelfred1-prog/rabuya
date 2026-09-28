@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     Table, Button, Modal, Card, Tag, Space, Select, DatePicker,
-    message, Spin, Descriptions, Badge,
+    message, Spin,
 } from 'antd';
 import {
     CheckOutlined, CloseOutlined, EyeOutlined,
@@ -449,33 +449,48 @@ const ParkingRemittances: React.FC = () => {
             >
                 {detailModal && (
                     <>
-                        <Descriptions bordered size="small" column={1} style={{ marginBottom: 16 }}>
-                            <Descriptions.Item label="Staff">
-                                <Space direction="vertical" size={0}>
-                                    <span style={{ fontWeight: 600 }}>
+                        {/* ─── Staff & Info Section (Card Style) ─── */}
+                        <div style={{
+                            background: 'var(--bg-surface-hover)',
+                            borderRadius: 10,
+                            padding: 16,
+                            marginBottom: 16,
+                            border: '1px solid var(--border)',
+                        }}>
+                            {/* Staff Row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Staff</span>
+                                <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                         {detailModal.staff?.first_name} {detailModal.staff?.last_name}
-                                    </span>
-                                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                                         {detailModal.staff?.email}
-                                    </span>
+                                    </div>
                                     {detailModal.staff?.employee_id && (
-                                        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                                             ID: {detailModal.staff.employee_id}
-                                        </span>
+                                        </div>
                                     )}
-                                </Space>
-                            </Descriptions.Item>
+                                </div>
+                            </div>
 
-                            <Descriptions.Item label="Remittance Date">
-                                {fmtDate(detailModal.remittance_date)}
-                            </Descriptions.Item>
+                            {/* Remittance Date Row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Remittance Date</span>
+                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                    {fmtDate(detailModal.remittance_date)}
+                                </span>
+                            </div>
 
-                            <Descriptions.Item label="Status">
+                            {/* Status Row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Status</span>
                                 <StatusTag status={detailModal.status} />
-                            </Descriptions.Item>
-                        </Descriptions>
+                            </div>
+                        </div>
 
-                        {/* Amounts breakdown */}
+                        {/* ─── Amount Breakdown Section ─── */}
                         <div style={{
                             background: 'var(--bg-surface-hover)',
                             borderRadius: 10,
@@ -533,17 +548,29 @@ const ParkingRemittances: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Timeline */}
-                        <Descriptions bordered size="small" column={1}>
-                            <Descriptions.Item label="Submitted At">
-                                {fmtDateTime(detailModal.created_at)}
-                            </Descriptions.Item>
+                        {/* ─── Timeline Section (Card Style) ─── */}
+                        <div style={{
+                            background: 'var(--bg-surface-hover)',
+                            borderRadius: 10,
+                            padding: 16,
+                            marginBottom: 16,
+                            border: '1px solid var(--border)',
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Submitted At</span>
+                                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                    {fmtDateTime(detailModal.created_at)}
+                                </span>
+                            </div>
                             {detailModal.reviewed_at && (
-                                <Descriptions.Item label="Reviewed At">
-                                    {fmtDateTime(detailModal.reviewed_at)}
-                                </Descriptions.Item>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Reviewed At</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                        {fmtDateTime(detailModal.reviewed_at)}
+                                    </span>
+                                </div>
                             )}
-                        </Descriptions>
+                        </div>
 
                         {detailModal.status === 'pending' && (
                             <div style={{

@@ -42,7 +42,7 @@ class FuelSaleController extends Controller
 
             $totalStock = (float) $totalStockBefore;
             if ($totalStock < $request->liters) {
-                DB::rollBack(); // ✅ FIX: rollback before returning
+                DB::rollBack(); 
                 return response()->json([
                     'message' => 'Insufficient stock. Available: ' . number_format($totalStock, 2) . ' L',
                 ], 422);

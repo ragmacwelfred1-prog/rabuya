@@ -15,17 +15,21 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // ✅ Trust Railway's proxy so HTTPS is detected correctly
-        $middleware->trustProxies(at: '*');
+    $middleware->trustProxies(at: '*');
 
-        $middleware->statefulApi();
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+    $middleware->statefulApi();
+    $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
-        $middleware->web(append: [
-            HandleAppearance::class,
-            AddLinkHeadersForPreloadedAssets::class,
-        ]);
-    })
+    // ✅ Register alias
+    $middleware->alias([
+        'customer.active' => \App\Http\Middleware\EnsureCustomerActive::class,
+    ]);
+
+    $middleware->web(append: [
+        HandleAppearance::class,
+        AddLinkHeadersForPreloadedAssets::class,
+    ]);
+})
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();

@@ -72,6 +72,12 @@ const STORAGE_URL =
 const DISCOUNT_THRESHOLD_NIGHTS = 6;
 const DISCOUNTED_RATE = 180;
 
+// ─── Active-status helper (fixes 0/1 vs boolean bugs) ─────────────────────
+/** Only true / 1 = active */
+const isCustomerActive = (
+    c: { is_active?: boolean | number | null } | null | undefined,
+): boolean => !!c && (c.is_active === true || c.is_active === 1);
+
 // ─── INTERFACES ───────────────────────────────────────────────────────────
 
 interface Vehicle {
@@ -99,7 +105,7 @@ interface Customer {
     license_photo?: string;
     license_photo_original_name?: string;
     license_photo_url?: string;
-    is_active?: boolean;
+    is_active?: boolean | number | null;
 }
 
 interface Booking {
@@ -277,7 +283,6 @@ const Customers: React.FC = () => {
 
     const [viewPaymentModal, setViewPaymentModal] = useState<Booking | null>(null);
 
-    // Customer Edit/License Management
     const [editCustomerModal, setEditCustomerModal] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [editForm] = Form.useForm();
@@ -286,7 +291,6 @@ const Customers: React.FC = () => {
     const [viewCustomerModal, setViewCustomerModal] = useState(false);
     const [viewCustomer, setViewCustomer] = useState<Customer | null>(null);
 
-    // License Photo Viewer Modal
     const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
     const [photoViewerData, setPhotoViewerData] = useState<{
         url: string;
@@ -399,8 +403,6 @@ const Customers: React.FC = () => {
         (n) => !readNotificationIds.has(n.id),
     );
     const totalNotifCount = visibleNotifications.length;
-
-    // ─── Customer Booking Type Map ────────────────────────────────────────
 
     const customerBookingTypeMap = useMemo(() => {
         const map = new Map<number, 'online' | 'walk_in' | null>();
@@ -572,7 +574,6 @@ const Customers: React.FC = () => {
                 ? custRes.data
                 : [];
 
-            // ✅ Compute license_photo_url for every customer
             customers.forEach((c) => {
                 c.license_photo_url = computeLicenseUrl(c.license_photo);
             });
@@ -587,14 +588,12 @@ const Customers: React.FC = () => {
             setAllNotifications(computeAllNotifications(p, a, t));
             setReadNotificationIds(new Set());
 
-            // ✅ Refresh viewCustomer with fresh data
             setViewCustomer((prev) => {
                 if (!prev) return prev;
                 const updated = customers.find((c) => c.id === prev.id);
                 return updated ? { ...prev, ...updated } : prev;
             });
 
-            // ✅ Refresh selectedCustomer with fresh data
             setSelectedCustomer((prev) => {
                 if (!prev) return prev;
                 const updated = customers.find((c) => c.id === prev.id);
@@ -613,7 +612,6 @@ const Customers: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Handle incoming "Book Now" navigation from ParkingSlots
     useEffect(() => {
         const navState = location.state as
             | {
@@ -717,8 +715,6 @@ const Customers: React.FC = () => {
             overdue_checkout: <WarningOutlined />,
         })[t] ?? <ClockCircleOutlined />;
 
-    // ─── LICENSE PHOTO VIEWER ─────────────────────────────────────────────
-
     const openPhotoViewer = (
         url: string,
         name?: string,
@@ -727,8 +723,6 @@ const Customers: React.FC = () => {
         setPhotoViewerData({ url, name, customerName });
         setPhotoViewerOpen(true);
     };
-
-    // ─── CUSTOMER EDIT HANDLERS ───────────────────────────────────────────
 
     const handleEditCustomer = (customer: Customer) => {
         setSelectedCustomer(customer);
@@ -739,8 +733,7 @@ const Customers: React.FC = () => {
             email: customer.email || '',
             phone_number: customer.phone_number,
             address: customer.address || '',
-            is_active:
-                customer.is_active !== undefined ? customer.is_active : true,
+            is_active: isCustomerActive(customer),
             license_number: customer.license_number || '',
             license_type: customer.license_type || undefined,
             license_expiration: customer.license_expiration
@@ -748,6 +741,38 @@ const Customers: React.FC = () => {
                 : null,
         });
         setEditCustomerModal(true);
+    };
+
+    const toggleCustomerStatus = async (customer: Customer) => {
+        const currentlyActive = isCustomerActive(customer);
+        const action = currentlyActive ? 'deactivate' : 'activate';
+
+        Modal.confirm({
+            title: `${action === 'deactivate' ? 'Deactivate' : 'Activate'} Customer`,
+            icon: <ExclamationCircleOutlined />,
+            content:
+                action === 'deactivate'
+                    ? `Deactivate ${customer.first_name} ${customer.last_name}'s account? They will be logged out immediately and cannot log in until reactivated.`
+                    : `Activate ${customer.first_name} ${customer.last_name}'s account?`,
+            okText: `Yes, ${action === 'deactivate' ? 'Deactivate' : 'Activate'}`,
+            okButtonProps: { danger: action === 'deactivate' },
+            cancelText: 'Cancel',
+            onOk: async () => {
+                try {
+                    const res = await api.patch(`/admin/customers/${customer.id}/toggle-status`);
+                    if (res.data.success) {
+                        message.success(res.data.message);
+                        await fetchAllData();
+                    } else {
+                        message.error(res.data.message || 'Failed to update status.');
+                    }
+                } catch (error: any) {
+                    message.error(
+                        error.response?.data?.message || 'Failed to update customer status.',
+                    );
+                }
+            },
+        });
     };
 
     const handleViewCustomer = (customer: Customer) => {
@@ -1393,19 +1418,6 @@ const Customers: React.FC = () => {
                     </div>
                 );
             },
-        },
-        {
-            title: 'Approved By',
-            key: 'ab',
-            width: 130,
-            render: (_: any, r: Booking) =>
-                r.approved_by ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                        {r.approved_by.first_name} {r.approved_by.last_name}
-                    </span>
-                ) : (
-                    <span style={{ color: 'var(--text-tertiary)' }}>–</span>
-                ),
         },
         {
             title: 'Actions',
@@ -2229,6 +2241,20 @@ const Customers: React.FC = () => {
             },
         },
         {
+            title: 'Status',
+            key: 'is_active',
+            width: 110,
+            align: 'center',
+            render: (_: any, r: Customer) => (
+                <Tag
+                    color={isCustomerActive(r) ? 'success' : 'error'}
+                    style={{ margin: 0, fontWeight: 600 }}
+                >
+                    {isCustomerActive(r) ? 'Active' : 'Inactive'}
+                </Tag>
+            ),
+        },
+        {
             title: 'Type',
             key: 'type',
             width: 100,
@@ -2302,13 +2328,41 @@ const Customers: React.FC = () => {
                                 />
                             </Tooltip>
                         )}
+                        {isAdmin && (
+                            <Tooltip
+                                title={
+                                    isCustomerActive(r)
+                                        ? 'Deactivate Account'
+                                        : 'Activate Account'
+                                }
+                            >
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={
+                                        isCustomerActive(r) ? (
+                                            <CloseCircleOutlined />
+                                        ) : (
+                                            <CheckCircleOutlined />
+                                        )
+                                    }
+                                    onClick={() => toggleCustomerStatus(r)}
+                                    style={{
+                                        color: isCustomerActive(r)
+                                            ? '#DC2626'
+                                            : 'var(--success)',
+                                        border: 'none',
+                                        background: 'transparent',
+                                    }}
+                                />
+                            </Tooltip>
+                        )}
                     </Space>
                 );
             },
         },
     ];
-
-    // ─── TABS ─────────────────────────────────────────────────────────────
+        // ─── TABS ─────────────────────────────────────────────────────────────
 
     const tabItems = [
         {
@@ -3216,6 +3270,15 @@ const Customers: React.FC = () => {
                 open={viewCustomerModal}
                 onCancel={() => setViewCustomerModal(false)}
                 footer={[
+                    isAdmin && viewCustomer && (
+                        <Button
+                            key="toggle"
+                            danger={isCustomerActive(viewCustomer)}
+                            onClick={() => toggleCustomerStatus(viewCustomer)}
+                        >
+                            {isCustomerActive(viewCustomer) ? 'Deactivate' : 'Activate'}
+                        </Button>
+                    ),
                     isAdmin && (
                         <Button
                             key="edit"
@@ -3256,8 +3319,8 @@ const Customers: React.FC = () => {
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Status">
                                     <Badge
-                                        status={viewCustomer.is_active !== false ? 'success' : 'error'}
-                                        text={viewCustomer.is_active !== false ? 'Active' : 'Inactive'}
+                                        status={isCustomerActive(viewCustomer) ? 'success' : 'error'}
+                                        text={isCustomerActive(viewCustomer) ? 'Active' : 'Inactive'}
                                     />
                                 </Descriptions.Item>
                                 <Descriptions.Item label="Vehicles">
@@ -3587,8 +3650,7 @@ const Customers: React.FC = () => {
                     </Tabs>
                 )}
             </Modal>
-
-            {/* ─── CHECK-IN MODAL ─────────────────────────────────────────── */}
+                        {/* ─── CHECK-IN MODAL ─────────────────────────────────────────── */}
             <Modal
                 title={
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>

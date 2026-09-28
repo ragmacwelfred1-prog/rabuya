@@ -48,7 +48,6 @@ class AdminBookingController extends Controller
     {
         try {
             $status = $request->input('status');
-
             $query = Booking::with([
                 'customer',
                 'parkingSlot',
@@ -58,20 +57,16 @@ class AdminBookingController extends Controller
                 'downpayment',
                 'confirmedBy',
             ])->orderBy('created_at', 'desc');
-
             if ($status && in_array($status, ['pending', 'approved', 'rejected', 'cancelled', 'completed'])) {
                 $query->where('status', $status);
             }
-
             $bookings = $query->get();
-
             $bookings->each(function ($booking) {
                 if ($booking->customer) {
                     $latestVehicle = $booking->customer->vehicles->sortByDesc('created_at')->first();
                     $booking->customer->plate_number  = $latestVehicle?->plate_number  ?? '';
                     $booking->customer->vehicle_model = $latestVehicle?->vehicle_model ?? '';
                 }
-
                 $booking->has_checked_in = $this->isCheckedIn($booking->transaction);
 
                 $booking->downpayment_status   = $booking->downpayment?->status;
@@ -410,6 +405,50 @@ class AdminBookingController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Quick toggle active/inactive status (no need to open edit modal)
+     */
+  /**
+ * Quick toggle active/inactive status (no need to open edit modal)
+ */
+public function toggleCustomerStatus($id)
+{
+    try {
+        $customer = User::where('role', 'customer')->findOrFail($id);
+        $customer->refresh();
+
+        $customer->is_active = ! (bool) $customer->is_active;
+        $customer->save();
+
+        // Agad i-revoke ang lahat ng tokens kapag na-deactivate
+        if (! $customer->is_active) {
+            $customer->tokens()->delete();
+        }
+
+        Log::info('Customer status toggled', [
+            'customer_id' => $customer->id,
+            'email'       => $customer->email,
+            'new_status'  => $customer->is_active ? 'active' : 'inactive',
+            'admin_id'    => auth()->id(),
+        ]);
+
+        return response()->json([
+            'success'     => true,
+            'message'     => $customer->is_active
+                ? 'Customer account activated.'
+                : 'Customer account deactivated. They have been logged out.',
+            'is_active'   => (bool) $customer->is_active,
+            'customer_id' => $customer->id,
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Toggle customer status error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to update customer status.',
+        ], 500);
+    }
+}
 
     /**
      * Upload license photo

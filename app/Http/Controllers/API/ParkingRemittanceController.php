@@ -7,6 +7,7 @@ use App\Models\ParkingRemittance;
 use App\Models\ParkingPayment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Http\Controllers\API\NotificationController; // Added import
 
 class ParkingRemittanceController extends Controller
 {
@@ -143,9 +144,67 @@ class ParkingRemittanceController extends Controller
             'reviewed_at' => now(),
         ]);
 
+        // Trigger notification for the staff
+        $this->notifyStaff($remittance, $request->status, 'Parking', '/(staff)/parking-remittance');
+
         return response()->json([
             'message'    => "Remittance {$request->status}.",
             'remittance' => $remittance->fresh('staff'),
         ]);
+    }
+
+    /**
+     * Send notification to staff regarding remittance status.
+     */
+    private function notifyStaff(ParkingRemittance $r, string $status, string $label, string $route): void
+    {
+        $remitted = (float) $r->remitted_amount;
+        $actual   = (float) $r->actual_sales_amount;
+        $diff     = round($remitted - $actual, 2);   // + = sobra, - = kulang
+        $date     = \Carbon\Carbon::parse($r->remittance_date)->format('M d, Y');
+
+        if (abs($diff) < 0.01) {
+            $variance = 'exact';
+            $varianceText = 'Exact match ✓';
+        } elseif ($diff > 0) {
+            $variance = 'over';
+            $varianceText = 'SOBRA ng ₱' . number_format($diff, 2);
+        } else {
+            $variance = 'short';
+            $varianceText = 'KULANG ng ₱' . number_format(abs($diff), 2);
+        }
+
+        if ($status === 'rejected') {
+            $title = "❌ {$label} Remittance Rejected";
+            $type  = 'error';
+            $msg   = "Ang {$label} remittance mo para sa {$date} ay na-reject. {$varianceText}.";
+        } elseif ($variance === 'exact') {
+            $title = "✅ {$label} Remittance Approved";
+            $type  = 'success';
+            $msg   = "Na-approve ang {$label} remittance mo para sa {$date}. {$varianceText}.";
+        } else {
+            $title = "⚠️ {$label} Remittance Approved — {$varianceText}";
+            $type  = 'warning';
+            $msg   = "Na-approve ang remittance mo para sa {$date}, pero {$varianceText}. "
+                   . "Remitted: ₱" . number_format($remitted, 2)
+                   . " | Actual: ₱" . number_format($actual, 2) . ".";
+        }
+
+        NotificationController::createNotification(
+            $r->staff_id,
+            $title,
+            $msg,
+            $type,
+            [
+                'remittance_id'  => $r->id,
+                'category'       => 'remittance',
+                'priority'       => $variance === 'exact' && $status === 'approved' ? 'medium' : 'high',
+                'variance'       => $variance,
+                'difference'     => $diff,
+                'remitted'       => $remitted,
+                'actual'         => $actual,
+                'action'         => ['label' => 'View', 'route' => $route],
+            ]
+        );
     }
 }

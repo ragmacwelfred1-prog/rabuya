@@ -491,7 +491,7 @@ class ParkingController extends Controller
             $validator = Validator::make($request->all(), [
                 'amount_paid'    => 'required|numeric|min:0',
                 'discount'       => 'nullable|numeric|min:0',
-                'payment_method' => 'required|in:cash,card,gcash',
+                'payment_method' => 'required|in:cash,gcash',
             ]);
 
             if ($validator->fails()) {

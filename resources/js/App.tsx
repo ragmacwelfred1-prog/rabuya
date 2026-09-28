@@ -1,8 +1,14 @@
 // resources/js/App.tsx
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import {
+    Routes,
+    Route,
+    Navigate,
+    useLocation,
+    useNavigate,
+} from 'react-router-dom';
 import { ConfigProvider, theme as antdTheme, Spin } from 'antd';
-import { useAuthStore } from './stores/authStore';
+import { useAuthStore, registerNavigate } from './stores/authStore';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -344,12 +350,21 @@ function App() {
     const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
     const [initialized, setInitialized] = useState(false);
     const location = useLocation();
+    const navigate = useNavigate();
     const [isDark, setIsDark] = useState(() => {
         return (
             localStorage.getItem('theme') === 'dark' ||
             document.documentElement.getAttribute('data-theme') === 'dark'
         );
     });
+
+    // ─── Register Router Navigate for Axios Interceptor ─────────────────────
+    // Ito ang pumapalit sa window.location.href. Kapag nag-401 ang isang
+    // API call, softNavigate ang gagamitin — walang full page reload,
+    // kaya hindi ma-uunmount ang <Login /> habang nasa OTP step.
+    useEffect(() => {
+        registerNavigate((path: string) => navigate(path, { replace: true }));
+    }, [navigate]);
 
     // ─── Auth Check ──────────────────────────────────────────────────────────
 
@@ -411,9 +426,17 @@ function App() {
         };
     }, []);
 
-    // ─── Loading State ──────────────────────────────────────────────────────
+    // ─── Login Page Detection ───────────────────────────────────────────────
+    // Kailangan i-compute ito bago ang loading gate para hindi ma-unmount
+    // ang <Login /> habang nasa OTP step (kung saan maaaring totoong
+    // isLoading ang store dahil sa background checkAuth).
+    const isLoginPage = location.pathname === '/login';
 
-    if (!initialized || isLoading) {
+    // ─── Loading State ──────────────────────────────────────────────────────
+    // Huwag i-gate ang /login sa loading — otherwise, kung may stale token
+    // sa localStorage at tumatakbo ang checkAuth, ma-uunmount ang Login at
+    // mawawala ang OTP step state nito.
+    if (!isLoginPage && (!initialized || isLoading)) {
         return (
             <div
                 className="app-loading"
@@ -431,8 +454,6 @@ function App() {
     }
 
     // ─── Login Page ──────────────────────────────────────────────────────────
-
-    const isLoginPage = location.pathname === '/login';
 
     if (isLoginPage) {
         return (
