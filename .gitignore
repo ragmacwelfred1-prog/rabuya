@@ -25,3 +25,10 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+ 
+# Uploaded files (user data, hindi dapat sa git) 
+storage/app/public/license_photos/ 
+ 
+# Build artifacts 
+build.zip 
+build2.zip 

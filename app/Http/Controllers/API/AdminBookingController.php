@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Validator;
 
 class AdminBookingController extends Controller
 {
-    // ─── Pending bookings ─────────────────────────────────────────────────────
+    // ─── Pending bookings (simple version) ────────────────────────────────────
 
     public function getPendingBookings()
     {
@@ -28,7 +28,7 @@ class AdminBookingController extends Controller
             $transformed = $bookings->map(function ($booking) {
                 $customer = $booking->customer;
                 if ($customer) {
-                    $latestVehicle = $customer->vehicles()->latest()->first();
+                    $latestVehicle = $customer->vehicles->sortByDesc('created_at')->first();
                     $customer->vehicle_model = $latestVehicle->vehicle_model ?? '';
                     $customer->plate_number  = $latestVehicle->plate_number  ?? '';
                 }
@@ -37,7 +37,9 @@ class AdminBookingController extends Controller
 
             return response()->json($transformed);
         } catch (\Exception $e) {
-            Log::error('Get pending bookings error: ' . $e->getMessage());
+            Log::error('Get pending bookings error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([], 500);
         }
     }
@@ -84,12 +86,14 @@ class AdminBookingController extends Controller
 
             return response()->json($bookings);
         } catch (\Exception $e) {
-            Log::error('Get all bookings error: ' . $e->getMessage());
+            Log::error('Get all bookings error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([], 500);
         }
     }
 
-    // ─── All Pending Bookings ─────────────────────────────────────────────────
+    // ─── All Pending Bookings (with downpayment) ─────────────────────────────
 
     public function getAllPendingBookings()
     {
@@ -102,7 +106,7 @@ class AdminBookingController extends Controller
             $transformed = $bookings->map(function ($booking) {
                 $customer = $booking->customer;
                 if ($customer) {
-                    $latestVehicle = $customer->vehicles()->latest()->first();
+                    $latestVehicle = $customer->vehicles->sortByDesc('created_at')->first();
                     $customer->vehicle_model = $latestVehicle->vehicle_model ?? '';
                     $customer->plate_number  = $latestVehicle->plate_number  ?? '';
                 }
@@ -125,7 +129,9 @@ class AdminBookingController extends Controller
 
             return response()->json($transformed);
         } catch (\Exception $e) {
-            Log::error('Get pending bookings error: ' . $e->getMessage());
+            Log::error('Get pending bookings error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([], 500);
         }
     }
@@ -300,12 +306,6 @@ class AdminBookingController extends Controller
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            $customers->each(function ($customer) {
-                $customer->license_photo_url = $customer->license_photo
-                    ? asset('storage/' . $customer->license_photo)
-                    : null;
-            });
-
             return response()->json($customers);
         } catch (\Exception $e) {
             Log::error('Get all customers error: ' . $e->getMessage());
@@ -323,10 +323,6 @@ class AdminBookingController extends Controller
                     $q->latest()->limit(10);
                 }, 'bookings.parkingSlot'])
                 ->findOrFail($id);
-
-            $customer->license_photo_url = $customer->license_photo
-                ? asset('storage/' . $customer->license_photo)
-                : null;
 
             return response()->json($customer);
         } catch (\Exception $e) {
@@ -387,9 +383,6 @@ class AdminBookingController extends Controller
             ]);
 
             $customer->load(['vehicles']);
-            $customer->license_photo_url = $customer->license_photo
-                ? asset('storage/' . $customer->license_photo)
-                : null;
 
             return response()->json([
                 'success'  => true,
@@ -409,46 +402,43 @@ class AdminBookingController extends Controller
     /**
      * Quick toggle active/inactive status (no need to open edit modal)
      */
-  /**
- * Quick toggle active/inactive status (no need to open edit modal)
- */
-public function toggleCustomerStatus($id)
-{
-    try {
-        $customer = User::where('role', 'customer')->findOrFail($id);
-        $customer->refresh();
+    public function toggleCustomerStatus($id)
+    {
+        try {
+            $customer = User::where('role', 'customer')->findOrFail($id);
+            $customer->refresh();
 
-        $customer->is_active = ! (bool) $customer->is_active;
-        $customer->save();
+            $customer->is_active = ! (bool) $customer->is_active;
+            $customer->save();
 
-        // Agad i-revoke ang lahat ng tokens kapag na-deactivate
-        if (! $customer->is_active) {
-            $customer->tokens()->delete();
+            // Agad i-revoke ang lahat ng tokens kapag na-deactivate
+            if (! $customer->is_active) {
+                $customer->tokens()->delete();
+            }
+
+            Log::info('Customer status toggled', [
+                'customer_id' => $customer->id,
+                'email'       => $customer->email,
+                'new_status'  => $customer->is_active ? 'active' : 'inactive',
+                'admin_id'    => auth()->id(),
+            ]);
+
+            return response()->json([
+                'success'     => true,
+                'message'     => $customer->is_active
+                    ? 'Customer account activated.'
+                    : 'Customer account deactivated. They have been logged out.',
+                'is_active'   => (bool) $customer->is_active,
+                'customer_id' => $customer->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Toggle customer status error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update customer status.',
+            ], 500);
         }
-
-        Log::info('Customer status toggled', [
-            'customer_id' => $customer->id,
-            'email'       => $customer->email,
-            'new_status'  => $customer->is_active ? 'active' : 'inactive',
-            'admin_id'    => auth()->id(),
-        ]);
-
-        return response()->json([
-            'success'     => true,
-            'message'     => $customer->is_active
-                ? 'Customer account activated.'
-                : 'Customer account deactivated. They have been logged out.',
-            'is_active'   => (bool) $customer->is_active,
-            'customer_id' => $customer->id,
-        ]);
-    } catch (\Exception $e) {
-        Log::error('Toggle customer status error: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Failed to update customer status.',
-        ], 500);
     }
-}
 
     /**
      * Upload license photo
@@ -475,9 +465,9 @@ public function toggleCustomerStatus($id)
                 Storage::disk('public')->delete($customer->license_photo);
             }
 
-            $file        = $request->file('license_photo');
+            $file         = $request->file('license_photo');
             $originalName = $file->getClientOriginalName();
-            $path        = $file->store('license_photos', 'public');
+            $path         = $file->store('license_photos', 'public');
 
             $customer->update([
                 'license_photo'               => $path,
@@ -489,7 +479,7 @@ public function toggleCustomerStatus($id)
             return response()->json([
                 'success'                     => true,
                 'message'                     => 'License photo uploaded successfully',
-                'license_photo_url'           => asset('storage/' . $path),
+                'license_photo_url'           => $customer->fresh()->license_photo_url,
                 'license_photo_original_name' => $originalName,
             ]);
         } catch (\Exception $e) {
@@ -542,8 +532,8 @@ public function toggleCustomerStatus($id)
     public function getCustomerStats()
     {
         try {
-            $total = User::where('role', 'customer')->count();
-            $active = User::where('role', 'customer')->where('is_active', true)->count();
+            $total    = User::where('role', 'customer')->count();
+            $active   = User::where('role', 'customer')->where('is_active', true)->count();
             $inactive = User::where('role', 'customer')->where('is_active', false)->count();
 
             $withLicense = User::where('role', 'customer')
@@ -668,36 +658,45 @@ public function toggleCustomerStatus($id)
             DB::commit();
 
             // ─── CREATE NOTIFICATIONS (persisted — poller picks them up) ─────
+            // Ni-wrap sa try/catch para hindi i-fail ang approval kahit
+            // mag-error ang notification.
 
-            $staffUsers = User::whereIn('role', ['admin', 'staff'])->get();
-            foreach ($staffUsers as $staff) {
-                NotificationController::createNotification(
-                    $staff->id,
-                    '✅ Booking Approved',
-                    "Booking #{$booking->id} for {$booking->customer?->first_name} has been approved.",
-                    'success',
-                    [
-                        'booking_id' => $booking->id,
-                        'customer'   => $booking->customer?->first_name . ' ' . $booking->customer?->last_name,
-                        'slot'       => $booking->parkingSlot?->slot_number,
-                        'category'   => 'booking',
-                    ]
-                );
-            }
+            try {
+                $staffUsers = User::whereIn('role', ['admin', 'staff'])->get();
+                foreach ($staffUsers as $staff) {
+                    NotificationController::createNotification(
+                        $staff->id,
+                        '✅ Booking Approved',
+                        "Booking #{$booking->id} for {$booking->customer?->first_name} has been approved.",
+                        'success',
+                        [
+                            'booking_id' => $booking->id,
+                            'customer'   => $booking->customer?->first_name . ' ' . $booking->customer?->last_name,
+                            'slot'       => $booking->parkingSlot?->slot_number,
+                            'category'   => 'booking',
+                        ]
+                    );
+                }
 
-            if ($booking->customer_id) {
-                NotificationController::createNotification(
-                    $booking->customer_id,
-                    '✅ Booking Approved',
-                    "Your booking for Slot {$booking->parkingSlot?->slot_number} has been approved!",
-                    'success',
-                    [
-                        'booking_id' => $booking->id,
-                        'slot'       => $booking->parkingSlot?->slot_number,
-                        'check_in'   => $booking->check_in_date,
-                        'category'   => 'booking',
-                    ]
-                );
+                if ($booking->customer_id) {
+                    NotificationController::createNotification(
+                        $booking->customer_id,
+                        '✅ Booking Approved',
+                        "Your booking for Slot {$booking->parkingSlot?->slot_number} has been approved!",
+                        'success',
+                        [
+                            'booking_id' => $booking->id,
+                            'slot'       => $booking->parkingSlot?->slot_number,
+                            'check_in'   => $booking->check_in_date,
+                            'category'   => 'booking',
+                        ]
+                    );
+                }
+            } catch (\Throwable $notifEx) {
+                Log::error('Approve booking notification failed: ' . $notifEx->getMessage(), [
+                    'booking_id' => $booking->id,
+                    'trace'      => $notifEx->getTraceAsString(),
+                ]);
             }
 
             $booking = Booking::with(['customer', 'parkingSlot', 'customer.vehicles'])->find($id);
@@ -754,32 +753,39 @@ public function toggleCustomerStatus($id)
 
             // ─── CREATE NOTIFICATIONS (persisted) ─────────────────────────────
 
-            $staffUsers = User::whereIn('role', ['admin', 'staff'])->get();
-            foreach ($staffUsers as $staff) {
-                NotificationController::createNotification(
-                    $staff->id,
-                    '❌ Booking Rejected',
-                    "Booking #{$booking->id} for {$booking->customer?->first_name} has been rejected.",
-                    'error',
-                    [
-                        'booking_id' => $booking->id,
-                        'category'   => 'booking',
-                    ]
-                );
-            }
+            try {
+                $staffUsers = User::whereIn('role', ['admin', 'staff'])->get();
+                foreach ($staffUsers as $staff) {
+                    NotificationController::createNotification(
+                        $staff->id,
+                        '❌ Booking Rejected',
+                        "Booking #{$booking->id} for {$booking->customer?->first_name} has been rejected.",
+                        'error',
+                        [
+                            'booking_id' => $booking->id,
+                            'category'   => 'booking',
+                        ]
+                    );
+                }
 
-            if ($booking->customer_id) {
-                NotificationController::createNotification(
-                    $booking->customer_id,
-                    '❌ Booking Rejected',
-                    "Your booking for Slot {$booking->parkingSlot?->slot_number} was rejected.",
-                    'error',
-                    [
-                        'booking_id' => $booking->id,
-                        'slot'       => $booking->parkingSlot?->slot_number,
-                        'category'   => 'booking',
-                    ]
-                );
+                if ($booking->customer_id) {
+                    NotificationController::createNotification(
+                        $booking->customer_id,
+                        '❌ Booking Rejected',
+                        "Your booking for Slot {$booking->parkingSlot?->slot_number} was rejected.",
+                        'error',
+                        [
+                            'booking_id' => $booking->id,
+                            'slot'       => $booking->parkingSlot?->slot_number,
+                            'category'   => 'booking',
+                        ]
+                    );
+                }
+            } catch (\Throwable $notifEx) {
+                Log::error('Reject booking notification failed: ' . $notifEx->getMessage(), [
+                    'booking_id' => $booking->id,
+                    'trace'      => $notifEx->getTraceAsString(),
+                ]);
             }
 
             Log::info('Booking rejected', ['booking_id' => $id, 'rejected_by' => auth()->id()]);

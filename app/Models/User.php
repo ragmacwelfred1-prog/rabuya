@@ -34,6 +34,9 @@ class User extends Authenticatable
 
     protected $hidden = ['password', 'remember_token'];
 
+    // ─── Idagdag ito para laging kasama sa JSON response ang computed URL
+    protected $appends = ['license_photo_url'];
+
     protected $casts = [
         'is_active' => 'boolean',
         'email_verified' => 'boolean',
@@ -57,10 +60,10 @@ class User extends Authenticatable
 
     public function getLicensePhotoUrlAttribute(): ?string
     {
-        if ($this->license_photo) {
-            return asset('storage/' . $this->license_photo);
+        if (! $this->license_photo) {
+            return null;
         }
-        return null;
+        return rtrim(config('app.url'), '/') . '/sfiles/' . ltrim($this->license_photo, '/');
     }
 
     // ─── Relationships ────────────────────────────────────────────────────────

@@ -764,9 +764,6 @@ class AuthController extends Controller
     {
         $user = $request->user()->load('vehicles');
 
-        // Add license photo URL
-        $user->license_photo_url = $user->license_photo ? asset('storage/' . $user->license_photo) : null;
-
         return response()->json(['success' => true, 'user' => $user]);
     }
 

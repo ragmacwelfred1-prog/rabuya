@@ -64,9 +64,7 @@ const { Option } = Select;
 const { TabPane } = Tabs;
 
 // ─── Storage URL ──────────────────────────────────────────────────────────
-const STORAGE_URL =
-    (import.meta as any).env?.VITE_STORAGE_URL ||
-    'http://localhost:8000/storage';
+const STORAGE_URL = '/sfiles';
 
 // ─── Discount rules ────────────────────────────────────────────────────────
 const DISCOUNT_THRESHOLD_NIGHTS = 6;

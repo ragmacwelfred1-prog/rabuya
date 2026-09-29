@@ -143,6 +143,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/parking-remittances/check', [ParkingRemittanceController::class, 'checkToday']);
         Route::get('/parking-remittances/today-sales', [ParkingRemittanceController::class, 'getTodaySalesTotal']);
         Route::post('/parking-remittances', [ParkingRemittanceController::class, 'store']);
+
+        // ─── IDINAGDAG: Staff can view pending bookings ──────────────────────
+        Route::get('/bookings/pending', [AdminBookingController::class, 'getAllPendingBookings']);
     });
 
     // ─── CUSTOMER ROUTES ─────────────────────────────────────────────────────
@@ -203,7 +206,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/staff/{id}', [StaffController::class, 'update']);
         Route::delete('/staff/{id}', [StaffController::class, 'destroy']);
 
-        // Bookings
+        // Bookings — MAHALAGA: /bookings/pending DAPAT mauna bago /bookings/{id}
         Route::get('/bookings', [AdminBookingController::class, 'getAllBookings']);
         Route::get('/bookings/pending', [AdminBookingController::class, 'getAllPendingBookings']);
         Route::get('/bookings/{id}/downpayment', [DownpaymentController::class, 'adminDownpayment']);
