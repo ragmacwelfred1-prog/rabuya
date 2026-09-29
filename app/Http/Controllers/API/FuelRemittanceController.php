@@ -45,43 +45,58 @@ class FuelRemittanceController extends Controller
 
    
     public function store(Request $request)
-    {
-        $request->validate([
-            'remitted_amount' => 'required|numeric|min:0',
-        ]);
+{
+    $request->validate([
+        'remitted_amount' => 'required|numeric|min:0',
+    ]);
 
-        $staffId = Auth::id();
-        $today = now()->toDateString();
+    $staffId = Auth::id();
+    $today   = now()->toDateString();
 
-        // Check if already remitted today
-        $existing = FuelRemittance::where('staff_id', $staffId)
-            ->where('remittance_date', $today)
-            ->first();
+    $existing = FuelRemittance::where('staff_id', $staffId)
+        ->where('remittance_date', $today)
+        ->first();
 
-        if ($existing) {
-            return response()->json([
-                'message' => 'You have already submitted a remittance for today.',
-            ], 422);
-        }
+    // Block only when the existing remittance is NOT rejected
+    if ($existing && $existing->status !== 'rejected') {
+        return response()->json([
+            'message' => 'You have already submitted a remittance for today.',
+        ], 422);
+    }
 
-        // Compute actual sales
-        $actual = FuelSale::where('recorded_by', $staffId)
-            ->whereDate('sale_date', $today)
-            ->sum(DB::raw('liters_sold * price_per_liter'));
+    // Compute actual sales
+    $actual = FuelSale::where('recorded_by', $staffId)
+        ->whereDate('sale_date', $today)
+        ->sum(DB::raw('liters_sold * price_per_liter'));
 
-        $remittance = FuelRemittance::create([
-            'staff_id' => $staffId,
-            'remittance_date' => $today,
-            'remitted_amount' => round($request->remitted_amount, 2),
-            'actual_sales_amount' => round($actual, 2),
-            'status' => 'pending',
+    if ($existing) {
+        // Reuse the rejected row
+        $existing->update([
+            'remitted_amount'     => round((float) $request->remitted_amount, 2),
+            'actual_sales_amount' => round((float) $actual, 2),
+            'status'              => 'pending',
+            'reviewed_at'         => null,
         ]);
 
         return response()->json([
-            'message' => 'Remittance submitted successfully.',
-            'remittance' => $remittance,
-        ]);
+            'message'    => 'Remittance resubmitted successfully.',
+            'remittance' => $existing->fresh(),
+        ], 200);
     }
+
+    $remittance = FuelRemittance::create([
+        'staff_id'            => $staffId,
+        'remittance_date'     => $today,
+        'remitted_amount'     => round((float) $request->remitted_amount, 2),
+        'actual_sales_amount' => round((float) $actual, 2),
+        'status'              => 'pending',
+    ]);
+
+    return response()->json([
+        'message'    => 'Remittance submitted successfully.',
+        'remittance' => $remittance,
+    ], 201);
+}
 
     
     public function index(Request $request)

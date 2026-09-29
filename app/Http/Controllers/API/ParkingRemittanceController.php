@@ -48,47 +48,64 @@ class ParkingRemittanceController extends Controller
 
 
     public function store(Request $request)
-    {
-        $request->validate([
-            'remitted_amount' => 'required|numeric|min:0',
-        ]);
+{
+    $request->validate([
+        'remitted_amount' => 'required|numeric|min:0',
+    ]);
 
-        $staffId = Auth::id();
-        $today   = now()->toDateString();
+    $staffId = Auth::id();
+    $today   = now()->toDateString();
 
-        // Prevent duplicate submission
-        $existing = ParkingRemittance::where('staff_id', $staffId)
-            ->where('remittance_date', $today)
-            ->first();
+    $existing = ParkingRemittance::where('staff_id', $staffId)
+        ->where('remittance_date', $today)
+        ->first();
 
-        if ($existing) {
-            return response()->json([
-                'message' => 'You have already submitted a parking remittance for today.',
-            ], 422);
-        }
+    // Block only when the existing remittance is NOT rejected
+    if ($existing && $existing->status !== 'rejected') {
+        return response()->json([
+            'message' => 'You have already submitted a parking remittance for today.',
+        ], 422);
+    }
 
-        // Compute actual collections
-        $actual = ParkingPayment::where('status', 'paid')
-            ->where('processed_by', $staffId)
-            ->whereDate('created_at', $today)
-            ->whereHas('transaction.booking', function ($q) {
-                $q->where('booking_type', 'walk_in');
-            })
-            ->sum('amount_paid');
+    // Compute actual sales from walk-in parking payments processed by this staff
+    $actual = ParkingPayment::where('status', 'paid')
+        ->where('processed_by', $staffId)
+        ->whereDate('created_at', $today)
+        ->whereHas('transaction.booking', function ($q) {
+            $q->where('booking_type', 'walk_in');
+        })
+        ->sum('amount_paid');
 
-        $remittance = ParkingRemittance::create([
-            'staff_id'            => $staffId,
-            'remittance_date'     => $today,
+    if ($existing) {
+        // Reuse the rejected row so the unique constraint is satisfied.
+        // This preserves the audit trail (the previous rejection info is
+        // still visible in the admin review log if you keep history there).
+        $existing->update([
             'remitted_amount'     => round((float) $request->remitted_amount, 2),
             'actual_sales_amount' => round((float) $actual, 2),
             'status'              => 'pending',
+            'reviewed_at'         => null,
         ]);
 
         return response()->json([
-            'message'    => 'Parking remittance submitted successfully.',
-            'remittance' => $remittance,
-        ], 201);
+            'message'    => 'Parking remittance resubmitted successfully.',
+            'remittance' => $existing->fresh(),
+        ], 200);
     }
+
+    $remittance = ParkingRemittance::create([
+        'staff_id'            => $staffId,
+        'remittance_date'     => $today,
+        'remitted_amount'     => round((float) $request->remitted_amount, 2),
+        'actual_sales_amount' => round((float) $actual, 2),
+        'status'              => 'pending',
+    ]);
+
+    return response()->json([
+        'message'    => 'Parking remittance submitted successfully.',
+        'remittance' => $remittance,
+    ], 201);
+}
 
     
     public function index(Request $request)
