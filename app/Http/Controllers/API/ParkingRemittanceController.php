@@ -7,11 +7,27 @@ use App\Models\ParkingRemittance;
 use App\Models\ParkingPayment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use App\Http\Controllers\API\NotificationController; // Added import
+use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\API\NotificationController;
 
 class ParkingRemittanceController extends Controller
 {
-   
+    /**
+     * Compute today's net cash collection for a staff member.
+     * Net = amount_paid - change_amount (excludes GCash/online payments)
+     */
+    private function computeTodayCollection(int $staffId): float
+    {
+        $total = ParkingPayment::where('status', 'paid')
+            ->where('processed_by', $staffId)
+            ->where('payment_method', 'cash')
+            ->whereNotNull('parking_transaction_id')   // exclude GCash downpayment rows
+            ->whereDate('created_at', now()->toDateString())
+            ->sum(DB::raw('amount_paid - change_amount'));
+
+        return round(max(0, (float) $total), 2);
+    }
+
     public function checkToday()
     {
         $staffId = Auth::id();
@@ -27,87 +43,65 @@ class ParkingRemittanceController extends Controller
         ]);
     }
 
-    
     public function getTodaySalesTotal()
     {
+        return response()->json([
+            'actual_sales_amount' => $this->computeTodayCollection(Auth::id()),
+        ]);
+    }
+
+    public function store(Request $request)
+    {
+        $request->validate([
+            'remitted_amount' => 'required|numeric|min:0',
+        ]);
+
         $staffId = Auth::id();
         $today   = now()->toDateString();
 
-        $total = ParkingPayment::where('status', 'paid')
-            ->where('processed_by', $staffId)
-            ->whereDate('created_at', $today)
-            ->whereHas('transaction.booking', function ($q) {
-                $q->where('booking_type', 'walk_in');
-            })
-            ->sum('amount_paid');
+        $existing = ParkingRemittance::where('staff_id', $staffId)
+            ->where('remittance_date', $today)
+            ->first();
 
-        return response()->json([
-            'actual_sales_amount' => round((float) $total, 2),
-        ]);
-    }
+        // Block only when the existing remittance is NOT rejected
+        if ($existing && $existing->status !== 'rejected') {
+            return response()->json([
+                'message' => 'You have already submitted a parking remittance for today.',
+            ], 422);
+        }
 
+        // Compute actual sales (net cash)
+        $actual = $this->computeTodayCollection($staffId);
 
-    public function store(Request $request)
-{
-    $request->validate([
-        'remitted_amount' => 'required|numeric|min:0',
-    ]);
+        if ($existing) {
+            // Reuse the rejected row so the unique constraint is satisfied.
+            $existing->update([
+                'remitted_amount'     => round((float) $request->remitted_amount, 2),
+                'actual_sales_amount' => $actual,
+                'status'              => 'pending',
+                'reviewed_at'         => null,
+            ]);
 
-    $staffId = Auth::id();
-    $today   = now()->toDateString();
+            return response()->json([
+                'message'    => 'Parking remittance resubmitted successfully.',
+                'remittance' => $existing->fresh(),
+            ], 200);
+        }
 
-    $existing = ParkingRemittance::where('staff_id', $staffId)
-        ->where('remittance_date', $today)
-        ->first();
-
-    // Block only when the existing remittance is NOT rejected
-    if ($existing && $existing->status !== 'rejected') {
-        return response()->json([
-            'message' => 'You have already submitted a parking remittance for today.',
-        ], 422);
-    }
-
-    // Compute actual sales from walk-in parking payments processed by this staff
-    $actual = ParkingPayment::where('status', 'paid')
-        ->where('processed_by', $staffId)
-        ->whereDate('created_at', $today)
-        ->whereHas('transaction.booking', function ($q) {
-            $q->where('booking_type', 'walk_in');
-        })
-        ->sum('amount_paid');
-
-    if ($existing) {
-        // Reuse the rejected row so the unique constraint is satisfied.
-        // This preserves the audit trail (the previous rejection info is
-        // still visible in the admin review log if you keep history there).
-        $existing->update([
+        $remittance = ParkingRemittance::create([
+            'staff_id'            => $staffId,
+            'remittance_date'     => $today,
             'remitted_amount'     => round((float) $request->remitted_amount, 2),
-            'actual_sales_amount' => round((float) $actual, 2),
+            'actual_sales_amount' => $actual,
             'status'              => 'pending',
-            'reviewed_at'         => null,
         ]);
 
         return response()->json([
-            'message'    => 'Parking remittance resubmitted successfully.',
-            'remittance' => $existing->fresh(),
-        ], 200);
+            'message'    => 'Parking remittance submitted successfully.',
+            'remittance' => $remittance,
+        ], 201);
     }
 
-    $remittance = ParkingRemittance::create([
-        'staff_id'            => $staffId,
-        'remittance_date'     => $today,
-        'remitted_amount'     => round((float) $request->remitted_amount, 2),
-        'actual_sales_amount' => round((float) $actual, 2),
-        'status'              => 'pending',
-    ]);
-
-    return response()->json([
-        'message'    => 'Parking remittance submitted successfully.',
-        'remittance' => $remittance,
-    ], 201);
-}
-
-    
     public function index(Request $request)
     {
         $query = ParkingRemittance::with('staff');
@@ -133,7 +127,6 @@ class ParkingRemittanceController extends Controller
         );
     }
 
-
     public function show($id)
     {
         return response()->json(
@@ -141,7 +134,6 @@ class ParkingRemittanceController extends Controller
         );
     }
 
-   
     public function update(Request $request, $id)
     {
         $request->validate([
