@@ -54,51 +54,40 @@ class BookingCalendarController extends Controller
             $endDate = $startDate->copy()->endOfMonth()->endOfDay();
 
             // Get all bookings for this slot in the date range
-            $bookings = Booking::where('parking_slot_id', $slotId)
-                ->whereIn('status', ['pending', 'approved', 'completed'])
-                ->where(function ($query) use ($startDate, $endDate) {
-                    $query->whereBetween('check_in_date', [$startDate, $endDate])
-                        ->orWhereBetween('check_out_date', [$startDate, $endDate])
-                        ->orWhere(function ($q) use ($startDate, $endDate) {
-                            $q->where('check_in_date', '<=', $startDate)
-                                ->where('check_out_date', '>=', $endDate);
-                        });
-                })
-                ->get(['check_in_date', 'check_out_date', 'status']);
+            $today = Carbon::today();
 
-            // Format the booked dates
-            $bookedDates = $bookings->map(function ($booking) {
-                return [
-                    'check_in' => $booking->check_in_date->format('Y-m-d'),
-                    'check_out' => $booking->check_out_date->format('Y-m-d'),
-                    'status' => $booking->status,
-                ];
-            });
-
-            // Get active transactions for this slot
-            $activeTransactions = \App\Models\ParkingTransaction::with('booking')
-                ->whereHas('booking', function ($query) use ($slotId) {
-                    $query->where('parking_slot_id', $slotId);
-                })
-                ->whereNull('check_out_date')
+            // Pending/approved lang ang humaharang. Completed/cancelled/rejected = libre na.
+            $bookings = Booking::with('transaction')
+                ->where('parking_slot_id', $slotId)
+                ->whereIn('status', ['pending', 'approved'])
+                ->where('check_in_date', '<=', $endDate)
+                ->where('check_out_date', '>=', $startDate)
                 ->get();
 
-            // Add active check-ins to booked dates
-            foreach ($activeTransactions as $transaction) {
-                $booking = $transaction->booking;
-                if ($booking) {
-                    $bookedDates->push([
-                        'check_in' => $booking->check_in_date->format('Y-m-d'),
-                        'check_out' => $booking->check_out_date->format('Y-m-d'),
-                        'status' => 'active',
-                    ]);
-                }
-            }
+            $bookedDates = $bookings->map(function ($booking) use ($today) {
+                $checkIn  = $booking->check_in_date->copy()->startOfDay();
+                $checkOut = $booking->check_out_date->copy()->startOfDay();
+                $status   = $booking->status;
 
-            // Remove duplicates (if any)
-            $bookedDates = $bookedDates->unique(function ($item) {
-                return $item['check_in'] . '|' . $item['check_out'];
+                $tx = $booking->transaction;
+                if ($tx && $tx->check_out_date === null) {
+                    $status = 'active';
+                    // Overdue na? Block hanggang ngayon lang, hindi lampas.
+                    if ($checkOut->lt($today)) {
+                        $checkOut = $today->copy();
+                    }
+                }
+
+                return [
+                    'check_in'  => $checkIn->format('Y-m-d'),
+                    'check_out' => $checkOut->format('Y-m-d'),
+                    'status'    => $status,
+                ];
             })->values();
+
+            $activeTransactions = $bookings->filter(
+                fn ($b) => $b->transaction && $b->transaction->check_out_date === null
+            );
 
             // Get days in month for reference
             $daysInMonth = $endDate->day;
@@ -112,7 +101,7 @@ class BookingCalendarController extends Controller
                 'days_in_month' => $daysInMonth,
                 'booked_dates' => $bookedDates,
                 'summary' => [
-                    'total_bookings' => $bookings->count(),
+                    'total_bookings'  => $bookings->count(),
                     'active_checkins' => $activeTransactions->count(),
                 ],
             ]);
@@ -163,44 +152,39 @@ class BookingCalendarController extends Controller
 
             $startDate = Carbon::create($year, $month, 1)->startOfDay();
             $endDate = $startDate->copy()->endOfMonth()->endOfDay();
+            $today = Carbon::today();
 
             $result = [];
 
             foreach ($slots as $slot) {
                 // Get bookings for this slot
-                $bookings = Booking::where('parking_slot_id', $slot->id)
-                    ->whereIn('status', ['pending', 'approved', 'completed'])
-                    ->where(function ($query) use ($startDate, $endDate) {
-                        $query->whereBetween('check_in_date', [$startDate, $endDate])
-                            ->orWhereBetween('check_out_date', [$startDate, $endDate])
-                            ->orWhere(function ($q) use ($startDate, $endDate) {
-                                $q->where('check_in_date', '<=', $startDate)
-                                    ->where('check_out_date', '>=', $endDate);
-                            });
-                    })
-                    ->get(['check_in_date', 'check_out_date', 'status']);
-
-                // Get active check-ins
-                $activeTransactions = \App\Models\ParkingTransaction::with('booking')
-                    ->whereHas('booking', function ($query) use ($slot) {
-                        $query->where('parking_slot_id', $slot->id);
-                    })
-                    ->whereNull('check_out_date')
+                $bookings = Booking::with('transaction')
+                    ->where('parking_slot_id', $slot->id)
+                    ->whereIn('status', ['pending', 'approved'])
+                    ->where('check_in_date', '<=', $endDate)
+                    ->where('check_out_date', '>=', $startDate)
                     ->get();
 
-                // Combine bookings
-                $allBookings = $bookings->toArray();
+                // Build booked ranges with active status handling
+                $allBookings = $bookings->map(function ($booking) use ($today) {
+                    $checkIn  = $booking->check_in_date->copy()->startOfDay();
+                    $checkOut = $booking->check_out_date->copy()->startOfDay();
+                    $status   = $booking->status;
 
-                foreach ($activeTransactions as $transaction) {
-                    $booking = $transaction->booking;
-                    if ($booking) {
-                        $allBookings[] = [
-                            'check_in_date' => $booking->check_in_date->format('Y-m-d H:i:s'),
-                            'check_out_date' => $booking->check_out_date->format('Y-m-d H:i:s'),
-                            'status' => 'active',
-                        ];
+                    $tx = $booking->transaction;
+                    if ($tx && $tx->check_out_date === null) {
+                        $status = 'active';
+                        if ($checkOut->lt($today)) {
+                            $checkOut = $today->copy();
+                        }
                     }
-                }
+
+                    return [
+                        'check_in_date'  => $checkIn->format('Y-m-d H:i:s'),
+                        'check_out_date' => $checkOut->format('Y-m-d H:i:s'),
+                        'status'         => $status,
+                    ];
+                })->values()->toArray();
 
                 $result[] = [
                     'slot' => [
@@ -292,7 +276,8 @@ class BookingCalendarController extends Controller
                 $checkIn = Carbon::parse($booking->check_in_date)->startOfDay();
                 $checkOut = Carbon::parse($booking->check_out_date)->startOfDay();
 
-                if ($checkDate->between($checkIn, $checkOut)) {
+                // Half-open interval: [check_in, check_out)
+                if ($checkDate->gte($checkIn) && $checkDate->lt($checkOut)) {
                     return response()->json([
                         'success' => true,
                         'available' => false,
@@ -309,13 +294,11 @@ class BookingCalendarController extends Controller
                 }
             }
 
-            // Check for bookings on this date
+            // Check for bookings on this date (half-open interval)
             $booking = Booking::where('parking_slot_id', $slotId)
                 ->whereIn('status', ['pending', 'approved'])
-                ->where(function ($query) use ($checkDate) {
-                    $query->whereDate('check_in_date', '<=', $checkDate)
-                        ->whereDate('check_out_date', '>=', $checkDate);
-                })
+                ->whereDate('check_in_date', '<=', $checkDate)
+                ->whereDate('check_out_date', '>', $checkDate)
                 ->first();
 
             if ($booking) {
