@@ -28,6 +28,11 @@ class ParkingRemittanceController extends Controller
         return round(max(0, (float) $total), 2);
     }
 
+    /**
+     * Return today's remittance row for the logged-in staff.
+     * The row is reused/accumulated across partial submissions,
+     * so there is exactly ONE row per (staff_id, remittance_date).
+     */
     public function checkToday()
     {
         $staffId = Auth::id();
@@ -35,6 +40,7 @@ class ParkingRemittanceController extends Controller
 
         $remittance = ParkingRemittance::where('staff_id', $staffId)
             ->where('remittance_date', $today)
+            ->orderByDesc('updated_at')
             ->first();
 
         return response()->json([
@@ -50,48 +56,79 @@ class ParkingRemittanceController extends Controller
         ]);
     }
 
+    /**
+     * Submit a (possibly partial) remittance.
+     *
+     * Rules:
+     *  - Cannot remit while a PENDING remittance is awaiting review.
+     *  - Cannot remit more than today's total collection.
+     *  - Cannot remit more than the REMAINING (actual - alreadyRemitted).
+     *  - If a row exists (approved or rejected), it is reused and
+     *    remitted_amount is ACCUMULATED (approved portion + new amount).
+     */
     public function store(Request $request)
     {
         $request->validate([
-            'remitted_amount' => 'required|numeric|min:0',
+            'remitted_amount' => 'required|numeric|min:0.01',
         ]);
 
-        $staffId = Auth::id();
-        $today   = now()->toDateString();
+        $staffId  = Auth::id();
+        $today    = now()->toDateString();
+        $actual   = $this->computeTodayCollection($staffId);
+        $newAmount = round((float) $request->remitted_amount, 2);
 
         $existing = ParkingRemittance::where('staff_id', $staffId)
             ->where('remittance_date', $today)
             ->first();
 
-        // Block only when the existing remittance is NOT rejected
-        if ($existing && $existing->status !== 'rejected') {
+        // 1. Block if a PENDING remittance is awaiting review
+        if ($existing && $existing->status === 'pending') {
             return response()->json([
-                'message' => 'You have already submitted a parking remittance for today.',
+                'message' => 'You have a pending parking remittance awaiting review.',
             ], 422);
         }
 
-        // Compute actual sales (net cash)
-        $actual = $this->computeTodayCollection($staffId);
+        // 2. Cannot exceed today's total collection
+        if ($newAmount > $actual + 0.01) {
+            return response()->json([
+                'message' => 'You cannot remit more than today\'s total collection.',
+            ], 422);
+        }
 
+        // 3. Compute remaining based on what has been APPROVED so far
+        $alreadyApproved = 0.0;
+        if ($existing && $existing->status === 'approved') {
+            $alreadyApproved = (float) $existing->remitted_amount;
+        }
+        $remaining = round(max(0, $actual - $alreadyApproved), 2);
+
+        if ($newAmount > $remaining + 0.01) {
+            return response()->json([
+                'message' => 'Only ₱' . number_format($remaining, 2)
+                           . ' remains to be remitted.',
+            ], 422);
+        }
+
+        // 4. Reuse existing row (approved or rejected) and accumulate
         if ($existing) {
-            // Reuse the rejected row so the unique constraint is satisfied.
             $existing->update([
-                'remitted_amount'     => round((float) $request->remitted_amount, 2),
+                'remitted_amount'     => round($alreadyApproved + $newAmount, 2),
                 'actual_sales_amount' => $actual,
                 'status'              => 'pending',
                 'reviewed_at'         => null,
             ]);
 
             return response()->json([
-                'message'    => 'Parking remittance resubmitted successfully.',
+                'message'    => 'Parking remittance submitted successfully.',
                 'remittance' => $existing->fresh(),
             ], 200);
         }
 
+        // 5. First submission of the day
         $remittance = ParkingRemittance::create([
             'staff_id'            => $staffId,
             'remittance_date'     => $today,
-            'remitted_amount'     => round((float) $request->remitted_amount, 2),
+            'remitted_amount'     => $newAmount,
             'actual_sales_amount' => $actual,
             'status'              => 'pending',
         ]);
